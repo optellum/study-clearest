@@ -1,0 +1,14 @@
+[project]
+name = "study-clearest"
+version = "0.1.0"
+description = "R and Python scripts used to report MRMC stats, tables and figures from the study: "
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib==3.10.3",
+    "numpy==1.26.3",
+    "pandas==2.3.0",
+    "pydicom==2.4.4",
+    "scikit-learn==1.7.0",
+    "scipy==1.12.0",
+]

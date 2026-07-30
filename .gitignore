@@ -1,0 +1,21 @@
+# Manuscript — not committed
+*.docx
+
+# Study data and data-derived outputs — this repo must stay data-free
+*.csv
+*.imrmc
+*.dcm
+*.dicom
+resources/
+data/
+
+# Generated figure outputs (produced from the study data — data-derived)
+*.png
+*.pdf
+*.svg
+
+# Python / uv environment
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
