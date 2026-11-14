@@ -1,16 +1,20 @@
 """Primary endpoint tables for the CLEAREST main study manuscript (Radiology).
 
 Reproduces the three main-text tables that describe the cohort and the primary
-(patient likelihood-of-malignancy, PLoM) endpoint:
+(patient likelihood-of-malignancy, PLoM) endpoint, and supplemental Table E2:
 
 Table 1 -- Patient demographics and CT-scan characteristics (N=240) by final
            diagnosis. The benign group is split into CTs with a benign nodule
            and nodule-negative (NN) CTs, giving a 3-group comparison
            (Malignant / Benign nodule / Nodule negative).
 Table 2 -- Index-nodule characteristics (size, margins, density) by final
-           diagnosis (malignant vs benign).
+           diagnosis (malignant vs benign); size groups <9, 9 to <15, >=15 mm
+           (long-axis diameter).
 Table 3 -- PLoM effect size (aided - unaided AUC) by reader and index-nodule
-           subgroup, from the DBM RRRC analysis.
+           subgroup, from the DBM RRRC analysis, with a treatment x subgroup
+           interaction P value per factor.
+Table E2 -- Reader characteristics (n = 15): sub-specialty, years of
+           independent practice, region (UK / EU) and academic practice.
 
 Each table is written as a CSV to the output directory (default: ``tables/``).
 
@@ -22,6 +26,15 @@ Under ``<data-root>`` (default: ``../resources/clearest_main_study``):
   mrmc/dataset_effect_size_analysis.csv                               (Table 3)
       Per-(sub)group DBM effect sizes produced by the effect-size R analysis
       (aided/unaided AUC, effect size, RRRC p-value for each subgroup dataset).
+  mrmc/dataset_subgroup_interaction_analysis.csv                      (Table 3)
+      Treatment x subgroup interaction P value per factor, written by
+      effect_size_subgroup_interaction.R. Optional: if absent, the interaction
+      columns are left blank.
+  dataset/participant_demographic.csv                                 (Table E2)
+      One row per reader: participant_id, sub_specialty, exp_y (years of
+      practice), practice (institution, "<name>, <country>"), academic (Yes/No).
+      The region (UK / EU) is taken from the institution's country; the
+      institution itself is not output.
 
 Usage
 -----
@@ -57,7 +70,8 @@ CT_VENDOR_MAP = {
 
 
 def map_size(diameter):
-    """Bucket a long-axis diameter (mm) into small / medium / large."""
+    """Bucket an unrounded long-axis diameter (mm) into the prespecified
+    small (<9) / medium (9 to <15) / large (>=15 mm) groups."""
     if pd.isna(diameter):
         return np.nan
     if diameter < 9:
@@ -73,6 +87,7 @@ def preprocess_gt(df: pd.DataFrame) -> pd.DataFrame:
     df["is_spiculated"] = df["is_spiculated_gt"].apply(lambda x: 1 if x == "yes" else 0)
     df["attenuation_gt"] = df["attenuation_gt"].map(ATTENUATION_MAP)
     df["attenuation"] = df["attenuation"].map(ATTENUATION_MAP)
+    # Prespecified size groups on the unrounded long-axis diameter.
     df["size_bucket_gt"] = df["diameter_long_gt"].apply(map_size)
     return df
 
@@ -158,9 +173,6 @@ def build_table1(df: pd.DataFrame) -> pd.DataFrame:
     outcome = groups[1:]  # the three compared groups (exclude Total)
     denoms = {k: len(g) for k, g in groups}
 
-    def fmt_p(p):
-        return "" if p == "" or pd.isna(p) else f"{p:.3f}"
-
     def cat_p(col, keys):
         tab = np.array([[(g[col] == k).sum() for _, g in outcome] for k in keys])
         return stats.chi2_contingency(tab)[1]
@@ -182,44 +194,45 @@ def build_table1(df: pd.DataFrame) -> pd.DataFrame:
         for k, g in groups:
             n = (g[col] == value).sum()
             cells.append(f"{n} ({round(100 * n / denoms[k])})")
-        return cells + ["", ""]
+        return cells + [""]
 
     def med_iqr_row(label, col, p):
         cells = [label]
         for k, g in groups:
             s = g[col].dropna()
             cells.append(f"{s.median():.0f} [{s.quantile(0.25):.0f}, {s.quantile(0.75):.0f}]")
-        return cells + [fmt_p(p), ""]
+        return cells + [fmt_p(p)]
 
     def header(label, p):
-        return [label, "", "", "", "", fmt_p(p), ""]
+        return [label, "", "", "", "", fmt_p(p)]
 
-    def count_row(label, mask_fn, p="", q=""):
+    def count_row(label, mask_fn, p_text):
         cells = [label]
         for k, g in groups:
             n = int(mask_fn(g).sum())
             cells.append(f"{n} ({round(100 * n / denoms[k])})")
-        return cells + [fmt_p(p), fmt_p(q)]
+        return cells + [p_text]
 
     rows = []
     # Age -- Kruskal-Wallis (3-group nonparametric analogue of Mann-Whitney U).
     _, p_age = stats.kruskal(*[g.age.dropna() for _, g in outcome])
-    rows.append(med_iqr_row("Age (y), median [Q1, Q3]", "age", p_age))
+    rows.append(med_iqr_row("Age (y) *", "age", p_age))
 
     rows.append(header("Sex", cat_p("sex", ["F", "M"])))
     rows.append(npct_row("  Female", "sex", "F"))
     rows.append(npct_row("  Male", "sex", "M"))
 
-    rows.append(header("Type of chest CT", cat_p("is_screening", [1, 0])))
+    rows.append(header("Type of CT", cat_p("is_screening", [1, 0])))
     rows.append(npct_row("  Screening", "is_screening", 1))
     rows.append(npct_row("  Diagnostic", "is_screening", 0))
 
-    rows.append(header("Slice thickness", cat_p("slice_thickness_bucket", ["thin", "thick"])))
+    rows.append(header("Section thickness", cat_p("slice_thickness_bucket", ["thin", "thick"])))
     rows.append(npct_row("  0.5 to <1.5 mm", "slice_thickness_bucket", "thin"))
-    rows.append(npct_row("  1.5 mm - max", "slice_thickness_bucket", "thick"))
+    thick_max = df.SliceThickness.max()
+    rows.append(npct_row(f"  1.5 - {thick_max:g} mm", "slice_thickness_bucket", "thick"))
 
-    rows.append(header("CT-scan vendor", cat_p("ct_vendor", ["GE", "Siemens", "Philips", "Toshiba"])))
-    for label, val in [("  GE", "GE"), ("  Siemens", "Siemens"),
+    rows.append(header("CT-vendors", cat_p("ct_vendor", ["GE", "Siemens", "Philips", "Toshiba"])))
+    for label, val in [("  GE Healthcare", "GE"), ("  Siemens", "Siemens"),
                        ("  Philips", "Philips"), ("  Toshiba", "Toshiba")]:
         rows.append(npct_row(label, "ct_vendor", val))
 
@@ -236,26 +249,34 @@ def build_table1(df: pd.DataFrame) -> pd.DataFrame:
     ]
     raw_p = [comorb_p(fn) for _, fn in comorbidity_items]
     q_vals = false_discovery_control(raw_p, method="bh")
-    rows.append(count_row("Lung comorbidities",
-                          lambda g: g["pulmonary_diagnosis_gt"].notna(),
-                          p=comorb_p(lambda g: g["pulmonary_diagnosis_gt"].notna())))
+    # "†": any comorbidity vs none, not part of the BH block.
+    p_any = comorb_p(lambda g: g["pulmonary_diagnosis_gt"].notna())
+    rows.append(count_row("Lung Comorbidities", lambda g: g["pulmonary_diagnosis_gt"].notna(),
+                          fmt_p(p_any) + "†"))
     for (label, fn), p, q in zip(comorbidity_items, raw_p, q_vals):
-        rows.append(count_row(label, fn, p=p, q=q))
+        rows.append(count_row(label, fn, f"{fmt_p(p)} / {fmt_p(q)}"))
 
-    cols = ["Variable", f"Total (n={denoms['total']})", f"Malignant (n={denoms['mal']})",
-            f"Benign nodule (n={denoms['ben']})", f"Nodule negative (n={denoms['neg']})",
-            "p-value", "q (BH)"]
+    cols = ["Variable", f"Total (n={denoms['total']})", f"Cancer (n={denoms['mal']})",
+            f"Benign (n={denoms['ben']})", f"NN (n={denoms['neg']})",
+            "P value (unadjusted / adjusted)"]
     return pd.DataFrame(rows, columns=cols)
 
 
 TABLE1_CAPTION = (
-    "Table 1. Patient demographics and CT-scan characteristics (N=240) by final "
-    "diagnosis, benign split into CTs with a benign nodule and nodule-negative CTs. "
-    "Cells are n (column %). p-values are a 3-group omnibus (Malignant vs Benign "
-    "nodule vs Nodule negative): Kruskal-Wallis for age; Pearson chi-square for "
-    "categorical rows; comorbidities use chi-square (Fisher-Freeman-Halton exact when "
-    "any expected count <5). q (BH) applies Benjamini-Hochberg across the comorbidity "
-    "block; the 'Lung comorbidities' omnibus row is reported without a q-value."
+    "Table 1. Patient demographics, CT characteristics, and lung comorbidities by final"
+    " diagnosis (cancer, benign nodule, or nodule-negative) (N = 240).\n"
+    "Note – Unless otherwise indicated, data are numbers of examinations, with column "
+    "percentages in parentheses. P values compare the cancer, benign-nodule, and "
+    "nodule-negative groups. For the individual lung comorbidities, unadjusted / "
+    "adjusted P values are shown, adjusted with the Benjamini-Hochberg "
+    "false-discovery-rate procedure across the seven comorbidities; all other P values "
+    "are unadjusted. Statistical tests: age, Kruskal-Wallis test; sex, type of CT, "
+    "section thickness, and CT vendor, Pearson chi-square test of independence; each "
+    "comorbidity, treated as an independent binary (present/absent) variable, Pearson "
+    "chi-square test, or Fisher-Freeman-Halton exact test when any expected cell count "
+    "was less than 5. NN = nodule-negative. * Data are medians, with first and third "
+    "quartiles in brackets. † Any lung comorbidity versus none, tested as for the "
+    "individual comorbidities; not included in the Benjamini-Hochberg adjustment."
 )
 
 
@@ -264,6 +285,9 @@ TABLE1_CAPTION = (
 # --------------------------------------------------------------------------- #
 def build_table2(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+    # Restrict to index nodules (non-nodule cases have no GT diameter): column % use 188 / 95 / 93.
+    df = df[df.diameter_long_gt.notna()]
+    assert len(df) == 188
     total_n = len(df)
     mal, ben = df[df.is_cancer == 1], df[df.is_cancer == 0]
     n_mal, n_ben = len(mal), len(ben)
@@ -277,35 +301,37 @@ def build_table2(df: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     p_size = chi2_p("size_bucket_gt")
-    rows.append(["Index-nodule long diameter", "", "", "", f"{p_size:.3f}"])
-    for label, val in [("  Small (5-8 mm)", "small"), ("  Medium (9-14 mm)", "medium"),
-                       ("  Large (>=15 mm)", "large")]:
+    rows.append(["Diameter", "", "", "", fmt_p(p_size)])
+    for label, val in [("  Small (<9 mm)", "small"), ("  Medium (9 to <15 mm)", "medium"),
+                       ("  Large (≥15 mm)", "large")]:
         rows.append([label, npct(df.size_bucket_gt, total_n, val),
                      npct(mal.size_bucket_gt, n_mal, val), npct(ben.size_bucket_gt, n_ben, val), ""])
 
     p_spic = chi2_p("is_spiculated_gt")
-    rows.append(["Index-nodule margins", "", "", "", f"{p_spic:.3f}"])
-    for label, val in [("  Nonspiculated", "no"), ("  Spiculated", "yes")]:
+    rows.append(["Margins", "", "", "", fmt_p(p_spic)])
+    for label, val in [("  Non-spiculated", "no"), ("  Spiculated", "yes")]:
         rows.append([label, npct(df.is_spiculated_gt, total_n, val),
                      npct(mal.is_spiculated_gt, n_mal, val), npct(ben.is_spiculated_gt, n_ben, val), ""])
 
     # Nodule density: 3x2 Fisher-Freeman-Halton (small expected counts in part-solid/GGO).
     p_den = fisher_freeman_halton_3x2(pd.crosstab(df.attenuation_gt, df.is_cancer).values)
-    rows.append(["Nodule density", "", "", "", f"{p_den:.3f}"])
-    for label, val in [("  Solid", 1), ("  Part-solid", 2), ("  GGO", 3)]:
+    rows.append(["Attenuation", "", "", "", fmt_p(p_den)])
+    for label, val in [("  Solid", 1), ("  Part-solid", 2), ("  Ground Glass", 3)]:
         rows.append([label, npct(df.attenuation_gt, total_n, val),
                      npct(mal.attenuation_gt, n_mal, val), npct(ben.attenuation_gt, n_ben, val), ""])
 
-    cols = ["Variable", f"Total (n={total_n})", f"Malignant (n={n_mal})",
-            f"Benign (n={n_ben})", "p-value"]
+    cols = ["Variable", f"Total (n={total_n})", f"Cancer (n={n_mal})",
+            f"Benign (n={n_ben})", "P value"]
     return pd.DataFrame(rows, columns=cols)
 
 
 TABLE2_CAPTION = (
-    "Table 2. Index-nodule characteristics by final diagnosis (malignant vs benign). "
-    "Cells are n (column %); non-nodule cases are in the denominator but no category, "
-    "so rows need not sum to 100%. Tests: Pearson chi-square for size and margins; "
-    "Fisher-Freeman-Halton exact (3x2) for density (small expected counts)."
+    "Table 2. Index-nodule characteristics (N = 188).\n"
+    "Note – Data reported as counts (column-wise %). Statistical tests: Index-nodule "
+    "long-diameter category and index-nodule margins: Pearson chi-square test of "
+    "independence on the (malignant vs. benign); Nodule attenuation: "
+    "Fisher-Freeman-Halton exact tests. Percentages are column-wise within the 188 "
+    "index nodules."
 )
 
 
@@ -317,10 +343,10 @@ TABLE3_SUBGROUPS = [
     ("Reader specialty", None),
     ("  Cardiothoracic", "clearest_results_specialty_yes"),
     ("  Other", "clearest_results_specialty_no"),
-    ("Experience", None),
-    ("  >=5 y", "clearest_results_certification_yes"),
-    ("  <5 y", "clearest_results_certification_no"),
-    ("Previous use of AI tools", None),
+    ("Reader Experience", None),
+    ("  ≥5 y", "clearest_results_experience_yes"),
+    ("  <5 y", "clearest_results_experience_no"),
+    ("Prior use of AI tools", None),
     ("  Yes", "clearest_results_use_ai_yes"),
     ("  No", "clearest_results_use_ai_no"),
     ("Confirmation bias", None),
@@ -335,48 +361,114 @@ TABLE3_SUBGROUPS = [
     ("Trust in LCP", None),
     ("  Yes", "clearest_results_trust_in_lcp_yes"),
     ("  No", "clearest_results_trust_in_lcp_no"),
+    ("Type of CT-scan", None),
+    ("  Diagnostic", "clearest_results_not_screening"),
+    ("  Screening", "clearest_results_screening"),
     ("Index-nodule diameter", None),
-    ("  Small (5-8 mm)", "clearest_results_nodule_small"),
-    ("  Medium (9-14 mm)", "clearest_results_nodule_medium"),
-    ("  Large (>=15 mm)", "clearest_results_nodule_large"),
-    ("Index-nodule density", None),
+    ("  Small (<9 mm)", "clearest_results_nodule_small"),
+    ("  Medium (9 to <15 mm)", "clearest_results_nodule_medium"),
+    ("  Large (≥15 mm)", "clearest_results_nodule_large"),
+    ("Index-nodule attenuation", None),
     ("  Solid", "clearest_results_nodule_solid"),
     ("  Part-solid", "clearest_results_nodule_part_solid"),
-    ("  GGO", "clearest_results_nodule_ggo"),
+    ("  Ground glass", "clearest_results_nodule_ggo"),
     ("Index-nodule margins", None),
     ("  Nonspiculated", "clearest_results_nodule_non_spiculated"),
     ("  Spiculated", "clearest_results_nodule_spiculated"),
-    ("Type of chest CT", None),
-    ("  Diagnostic", "clearest_results_not_screening"),
-    ("  Screening", "clearest_results_screening"),
 ]
 
 
-def build_table3(csv_path: Path) -> pd.DataFrame:
-    df = pd.read_csv(csv_path).set_index("dataset")
+# Section header -> comparison name in dataset_subgroup_interaction_analysis.csv.
+# Experience = years of practice (exp_y >= 5; 5 vs 10 readers). The 11 pre-specified
+# factors form the Benjamini-Hochberg family.
+TABLE3_INTERACTION = {
+    "Reader specialty": "specialty",
+    "Reader Experience": "experience",
+    "Prior use of AI tools": "use_ai",
+    "Confirmation bias": "confirmation_bias",
+    "Automation bias": "automation_bias",
+    "Aversion bias": "aversion_bias",
+    "Trust in LCP": "trust_in_lcp",
+    "Index-nodule diameter": "nodule_size",
+    "Index-nodule attenuation": "attenuation",
+    "Index-nodule margins": "spiculation",
+    "Type of CT-scan": "screening",
+}
 
-    def fmt_p(p):
-        if pd.isna(p):
-            return ""
-        return "<0.001" if p < 0.001 else f"{p:.3f}"
+
+def fmt_p(p) -> str:
+    """P value in Radiology style: no leading zero; two digits, three if < .01 or
+    if two digits would read .05; exact unless < .001; > .99 at the top."""
+    if p is None or pd.isna(p):
+        return ""
+    if p < 0.001:
+        return "<.001"
+    if p > 0.99:
+        return ">.99"
+    out = f"{p:.3f}" if p < 0.01 or f"{p:.2f}" == "0.05" else f"{p:.2f}"
+    return out.lstrip("0")
+
+
+def table3_interaction_p(csv_path: Path) -> tuple[dict, dict]:
+    """Unadjusted and BH-adjusted interaction P values keyed by comparison name."""
+    if not csv_path.exists():
+        return {}, {}
+    df = pd.read_csv(csv_path)
+    df = df[df.endpoint == "patient_lom"].set_index("comparison")
+    pcol = "p_interaction_raw" if "p_interaction_raw" in df.columns else "p_interaction"
+    raw = {name: df.loc[name, pcol]
+           for name in TABLE3_INTERACTION.values() if name in df.index}
+    family = list(raw)
+    assert len(family) == 11, family
+    adj = false_discovery_control([raw[n] for n in family], method="bh")
+    return raw, dict(zip(family, adj))
+
+
+def build_table3(csv_path: Path, interaction_csv: Path | None = None) -> pd.DataFrame:
+    df = pd.read_csv(csv_path).set_index("dataset")
+    raw_p, adj_p = table3_interaction_p(interaction_csv) if interaction_csv else ({}, {})
+
+    def fmt_auc(est, lo, hi, cap=True):
+        """AUC-scale value and 95% CI to two decimals; AUC CIs truncated to [0, 1]."""
+        if cap:
+            lo, hi = max(lo, 0.0), min(hi, 1.0)
+        # Two decimals, no negative zero, Unicode minus sign as in the manuscript.
+        f2 = lambda x: f"{x:.2f}".replace("-0.00", "0.00").replace("-", "−")
+        return f"{f2(est)} ({f2(lo)}, {f2(hi)})"
 
     rows = []
     for label, key in TABLE3_SUBGROUPS:
         if key is None:
-            rows.append([label, "", "", "", ""])
+            name = TABLE3_INTERACTION.get(label)
+            p_int = (f"{fmt_p(raw_p[name])} / {fmt_p(adj_p[name])}" if name in raw_p else "")
+            rows.append([label, "", "", "", "", p_int])
             continue
         r = df.loc[key]
-        rows.append([label, r["unaided_trt"], r["aided_trt"], r["effect_size"],
-                     fmt_p(r["pvalue_rrrc"])])
-    cols = ["Variable", "Avg AUC w/o CAD", "Avg AUC with CAD", "Effect size", "p-value"]
+        rows.append([label,
+                     fmt_auc(r["unaided_raw"], r["unaided_lo_raw"], r["unaided_hi_raw"]),
+                     fmt_auc(r["aided_raw"], r["aided_lo_raw"], r["aided_hi_raw"]),
+                     fmt_auc(r["es_raw"], r["es_lo_raw"], r["es_hi_raw"], cap=False),
+                     fmt_p(r["pvalue_rrrc_raw"]), ""])
+    cols = ["Variable", "Average AUC without CAD", "Average AUC with CAD", "Effect size",
+            "P value, aided vs unaided", "P for interaction (unadjusted / adjusted)"]
     return pd.DataFrame(rows, columns=cols)
 
 
 TABLE3_CAPTION = (
-    "Table 3. Average reader AUC with and without CAD, and the AI effect size "
-    "(aided - unaided AUC), by prespecified reader and index-nodule subgroup. "
-    "Values are mean (95% CI) in percentage points. p-values are from the DBM "
-    "random-reader random-case (RRRC) analysis."
+    "Table 3. Effect size for patient likelihood of malignancy (PLoM) by reader and "
+    "index-nodule subgroup.\n"
+    "Note - Average AUC (95% CI) and subgroup effect size (95% CI) are estimated by the"
+    " DBM method; the column “P value, aided vs unaided” (subgroup rows) tests the "
+    "aided vs unaided difference within each subgroup by the DBM method (unadjusted). "
+    "The column “P for interaction” (factor header rows) tests whether the aided vs "
+    "unaided effect size differs across that factor’s subgroups (the subgroup × "
+    "treatment interaction), by one-way ANOVA on subgroup-level means of the "
+    "per-(reader, case) DBM aided vs unaided pseudovalue differences. Adjusted P values"
+    " use the Benjamini-Hochberg procedure across the 11 factors. The small group "
+    "includes 12 index nodules <5 mm. All subgroup analyses are exploratory. AI = "
+    "artificial intelligence, AUC = area under the receiver operating characteristic "
+    "curve, CAD = computer-aided detection and diagnosis, DBM = Dorfman-Berbaum-Metz, "
+    "LCP = Lung Cancer Prediction, PLoM = patient likelihood of malignancy."
 )
 
 
@@ -393,6 +485,48 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+# --------------------------------------------------------------------------- #
+# Table E2 -- reader characteristics
+# --------------------------------------------------------------------------- #
+READERS = ["MP0", "MP1", "MP2", "MP3", "MP4", "MP5", "MP6", "MP7", "MP8",
+           "MP9", "MP10", "MP11", "MP13", "MP15", "MP17"]
+
+TABLE_E2_CAPTION = (
+    "Table E2. Reader characteristics (n = 15). Years of independent CT interpretation "
+    "reported.\n"
+    "Note - LCS = Lung Cancer Screening. UK - United Kingdom; EU - Europe."
+)
+
+
+# Sub-specialty strings in participant_demographic.csv -> manuscript wording (Table E2).
+E2_SPECIALTY_DISPLAY = {
+    "General; Nuclear Medicine and Head & Neck Imaging": "General; Nuclear Medicine; Head & Neck",
+    "Neuroradiology; Lung cancer screening; General": "Neuro; LCS; General",
+    "Cardiothoracic; Head and Neck": "Cardiothoracic; Head & Neck",
+}
+
+
+def build_table_E2(csv_path: Path) -> pd.DataFrame:
+    """Reader table in reader order; the institution is used for the region only and is
+    not output. (The ``country`` column is not used: it disagrees with the institution
+    for one reader.)"""
+    d = pd.read_csv(csv_path, encoding="utf-8-sig").set_index("participant_id")
+    missing = [r for r in READERS if r not in d.index]
+    if missing:
+        raise ValueError(f"readers missing from {csv_path.name}: {missing}")
+    d = d.loc[READERS]
+    years = d["exp_y"].map(lambda y: f"{y:g}")
+    return pd.DataFrame({
+        "Index": range(1, len(READERS) + 1),
+        "Radiology sub-specialty(ies)": d["sub_specialty"].str.strip()
+                                        .replace(E2_SPECIALTY_DISPLAY).values,
+        "Years of Experience": years.values,
+        "Country": d["practice"].str.strip().str.rsplit(",", n=1).str[-1].str.strip()
+                  .map(lambda c: "UK" if c == "UK" else "EU").values,
+        "Academic": d["academic"].str.strip().values,
+    })
+
+
 def main() -> None:
     args = parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -403,7 +537,10 @@ def main() -> None:
         ("table1_demographics.csv", TABLE1_CAPTION, build_table1(patients)),
         ("table2_index_nodule.csv", TABLE2_CAPTION, build_table2(patients)),
         ("table3_effect_size_by_subgroup.csv", TABLE3_CAPTION,
-         build_table3(args.data_root / "mrmc" / "dataset_effect_size_analysis.csv")),
+         build_table3(args.data_root / "mrmc" / "dataset_effect_size_analysis.csv",
+                      args.data_root / "mrmc" / "dataset_subgroup_interaction_analysis.csv")),
+        ("tableE2_reader_characteristics.csv", TABLE_E2_CAPTION,
+         build_table_E2(args.data_root / "dataset" / "participant_demographic.csv")),
     ]
     for fname, caption, df in tables:
         print(caption)

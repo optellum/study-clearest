@@ -7,7 +7,7 @@ with the standalone AI ("CAD alone") as a reference.
 
 Figures produced
 ----------------
-Figure 6  -- Free-response ROC (FROC) operating point for nodule detection:
+Figure 5  -- Free-response ROC (FROC) operating point for nodule detection:
              across-reader mean sensitivity (detection rate) versus mean false
              positives (FP) per case, at a 1x nodule-diameter match radius, for
              unaided readers, aided readers, and CAD alone. Shown for all nodules
@@ -23,10 +23,33 @@ Figure E2 -- Bland-Altman agreement of reader vs expert-annotated (EA) long-axis
 Both figures use a 1x nodule-diameter match radius to pair detections with the
 expert-annotated ground truth.
 
+Manuscript legends
+------------------
+Caption text copied from the clean resubmission manuscript and supplement (CLEAREST_manuscript_121126, CLEAREST_supplemental_121126).
+
+Figure 5. Nodule detection operating points: average per-reader sensitivity vs. average
+false positives (FP) per case at a 1× nodule-diameter matching radius, for all reference
+nodules (black) and for nodules ≥ 5 mm (red), with each reader's unaided (open) and
+aided (filled) operating points connected. The CAD-alone operating point is shown only
+for nodules ≥ 5 mm, since the device reports only nodules at or above that size. Results
+are within range of those in the literature (26). EA = Expert Adjudication; CAD =
+computer-aided detection. Results reported as mean and Standard Error (SE).
+
+Figure E2. Bland-Altman analysis of reader-measured nodule long-diameter against the
+Expert Adjudication reference, unaided (A), aided (B), and of the device-alone
+measurement (C). Each point is a reader-nodule pair on a true-positive matched nodule.
+Solid horizontal line = mean bias; dashed horizontal lines = 95% limits of agreement.
+Aided reading shifted the mean bias from −0.47 mm to 0.99 mm (Δ = 1.46 mm; paired
+Wilcoxon on True Positive, matching, nodules, P < .001); the 95% limits of agreement
+remained wide and largely overlapping (unaided -7.28 to 6.34 mm; aided −5.67 to 7.66
+mm). Device-alone bias, +1.31 mm (−4.24 to 6.87 mm). With CAD, 85% of matched aided
+measurements were the device measurement recorded unchanged (Appendix E7). EA - Expert
+Adjudication.
+
 Data inputs (not distributed with this repository)
 --------------------------------------------------
 Under ``<data-root>/detection_rate/`` (default data root: ``../resources/clearest_main_study``):
-  matched_all_readers_sessions_notn_all_ignore_filtered.csv   (Figure 6)
+  matched_all_readers_sessions_notn_all_ignore_filtered.csv   (Figure 5)
       Matched detections per (reader, session), with false positives on the
       cardiothoracic-consensus missed-GT ignore-list removed.
   matched_all_readers_sessions_notn_all.csv                   (Figure E2)
@@ -66,13 +89,13 @@ READERS = ["MP0", "MP1", "MP2", "MP3", "MP4", "MP5", "MP6", "MP7", "MP8",
            "MP9", "MP10", "MP11", "MP13", "MP15", "MP17"]
 
 OPERATING_DM = 1       # operating point: match radius = 1x nodule diameter
-MIN_DIAMETER_MM = 5    # EA-diameter threshold for the >= 5 mm subset (Figure 6)
+MIN_DIAMETER_MM = 5    # EA-diameter threshold for the >= 5 mm subset (Figure 5)
 
 FONTSIZE = 14
 
 
 # --------------------------------------------------------------------------- #
-# Figure 6 -- detection-rate FROC operating point
+# Figure 5 -- detection-rate FROC operating point
 # --------------------------------------------------------------------------- #
 def cases_per_reader(matched: pd.DataFrame) -> pd.DataFrame:
     """Number of distinct cases read by each (reader, session)."""
@@ -118,8 +141,8 @@ def _froc_summary(sub: pd.DataFrame):
     }
 
 
-def make_figure6(matched: pd.DataFrame, out_path: Path) -> None:
-    """Figure 6 -- reader sensitivity vs FP/case at a 1x-diameter match radius."""
+def make_figure5(matched: pd.DataFrame, out_path: Path) -> None:
+    """Figure 5 -- reader sensitivity vs FP/case at a 1x-diameter match radius."""
     n_cases = cases_per_reader(matched)
     matched_op = matched[matched["diam_multiplier"] == OPERATING_DM]
 
@@ -286,11 +309,11 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     detection_dir = args.data_root / "detection_rate"
 
-    print("Figure 6 (detection-rate FROC operating point):")
+    print("Figure 5 (detection-rate FROC operating point):")
     matched_filtered = pd.read_csv(
         detection_dir / "matched_all_readers_sessions_notn_all_ignore_filtered.csv",
         low_memory=False)
-    make_figure6(matched_filtered, args.out_dir / "figure6_detection_rate_froc.png")
+    make_figure5(matched_filtered, args.out_dir / "figure5_detection_rate_froc.png")
 
     print("Figure E2 (Bland-Altman reader vs EA diameter):")
     matched_all = pd.read_csv(

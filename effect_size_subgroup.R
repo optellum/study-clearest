@@ -23,21 +23,22 @@
 #   - ai_attitudes.csv: per-reader attitude flags (confirmation_bias,
 #     automation_bias, aversion_bias, trust_in_lcp, use_ai; 1 = yes / 0 = no)
 #     and a "participants" id, used only to label the output rows.
+#
+# Inference is the DBM jackknife (RJafroc covEstMethod = "jackknife",
+# the default) and is deterministic; no bootstrap is used.
 # ==================================================================
 
 suppressMessages({
   library(RJafroc)
 })
-set.seed(123)
 
 mrmc_dir <- "resources/clearest_main_study/mrmc"
 ux_dir   <- "resources/clearest_main_study/ux"
-out_file <- file.path(ux_dir, "ux_analysis_boot2000.csv")
+out_file <- file.path(ux_dir, "ux_analysis_dbm.csv")
 
 FOM            <- "Wilcoxon"
 method         <- "DBM"
 analysisOption <- "RRRC"  # random readers, random cases
-n_boots        <- 2000
 round_n        <- 2
 
 # Reader subgroups, each with a "yes" / "no" level.
@@ -62,7 +63,7 @@ subgroup_effect <- function(group, group_id) {
                        paste0("clearest_results__", group, "_", group_id, "_patient_lom.imrmc"))
   rocData <- DfReadDataFile(infile, format = "iMRMC", delimiter = ",")
   result <- UtilOutputReport(dataset = rocData, ReportFileBaseName = outfile,
-                             FOM = FOM, method = method, overWrite = TRUE, nBoots = n_boots)
+                             FOM = FOM, method = method, overWrite = TRUE)
   fom  <- result$FOM
   rrrc <- result$RRRC
   list(

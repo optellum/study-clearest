@@ -3,7 +3,7 @@
 # ==================================================================
 # Extended DBM analysis: treatment x subgroup interaction
 # ------------------------------------------------------------------
-# effect_size_cohort.R runs an independent DBM significance test
+# effect_size_subgroup_dbm.R runs an independent DBM significance test
 # (aided vs unaided) per subgroup. This script instead pools the
 # subgroup levels into a single model and tests whether the AI effect
 # (aided - unaided) DIFFERS across the subgroup levels, i.e. whether
@@ -164,6 +164,7 @@ analyse_comparison <- function(name, type, endpoint) {
     df_interaction = round(df_int, 2),
     f_interaction = round(f_int, round_n),
     p_interaction = round(p_int, round_n),
+    p_interaction_raw = p_int,
     significant = p_int < alpha,
     ai_effect_by_level = delta_str
   )
