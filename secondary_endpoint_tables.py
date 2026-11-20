@@ -27,7 +27,7 @@ Under ``<data-root>`` (default: ``../resources/clearest_main_study``):
       annotations (attenuation) used for the agreement rows.
   detection_rate/matched_all_readers_sessions_notn_all.csv           (Table 4)
       Matched detections per (reader, session) for the detection/size/attenuation
-      agreement rows (1x-diameter match radius = diam_multiplier 0.75 rows used).
+      agreement rows (1x-diameter match radius: diam_multiplier 1 rows used).
   mrmc/all/clearest_results_patient_lom.csv                           (Table E5)
       Per (reader, case) unaided (LOM1) and aided (LOM2) pLoM and truth L.
   dataset/clearest_patient_data_240_main_study_max_lcp_score_gt.csv   (Table E5)
@@ -73,7 +73,7 @@ READERS = ["MP0", "MP1", "MP2", "MP3", "MP4", "MP5", "MP6", "MP7", "MP8",
 #   Nodule-level, on matched detections (inter_reader_fleiss_kappa_table.py):
 #     - nodule detection, size and attenuation
 # =========================================================================== #
-TABLE4_DM = 0.75  # match radius (diameter multiplier) for the nodule-level rows
+TABLE4_DM = 1.0  # match radius (diameter multiplier) for the nodule-level rows: 1x EA long-axis diameter, as in the paper
 
 # pLoM (%) risk categories: ACCP-based, as used by Kim et al, Radiology 2022;304:683-691
 # (Table 4: very low <5%, low-moderate 5%-30%, moderate-high 31%-65%, high >65%; citing Gould et
@@ -778,10 +778,30 @@ def _mean_se(sub, col):
     return sub[col].mean(), sub[col].std(ddof=1) / np.sqrt(len(sub))
 
 
-def build_table_E4(matched: pd.DataFrame) -> pd.DataFrame:
-    """Across-reader mean sensitivity and FP/case (unaided/aided/CAD alone)."""
-    cases = (matched.groupby(["reader", "is_aided_encord"])["key"]
-             .nunique().rename("n_cases").reset_index())
+def cases_read(data_root: Path, readers=None) -> pd.DataFrame:
+    """CTs read per (reader, session): the FP-per-case denominator.
+
+    Each reader export has a row for every CT read (marked or not); the device was
+    run on all study CTs. Counting cases from the matched-detection table instead
+    would omit CTs with no marks and no reference nodule.
+    """
+    readers = READERS if readers is None else readers
+    rows = []
+    for r in readers:
+        ex = pd.read_csv(data_root / "final_exports" / f"{r}_S1_S2_final.csv",
+                         usecols=["study_id", "is_aided_encord"], low_memory=False)
+        for s, sub in ex.groupby("is_aided_encord"):
+            rows.append({"reader": r, "is_aided_encord": s, "n_cases": sub["study_id"].nunique()})
+    n_study = pd.read_csv(data_root / "dataset" / "clearest_patient_data_240.csv")["study_id_stage1"].nunique()
+    rows.append({"reader": "ai", "is_aided_encord": 1, "n_cases": n_study})
+    return pd.DataFrame(rows)
+
+
+def build_table_E4(matched: pd.DataFrame, cases: pd.DataFrame) -> pd.DataFrame:
+    """Across-reader mean sensitivity and FP/case (unaided/aided/CAD alone).
+
+    ``cases``: CTs read per (reader, session), from ``cases_read``.
+    """
     matched_op = matched[matched["diam_multiplier"] == OPERATING_DM]
 
     def fmt(mean, se):
@@ -947,7 +967,7 @@ def main() -> None:
     matched = pd.read_csv(
         detection_dir / "matched_all_readers_sessions_notn_all_ignore_filtered.csv",
         low_memory=False)
-    table_e4 = build_table_E4(matched)
+    table_e4 = build_table_E4(matched, cases_read(args.data_root))
     print(table_e4.to_string(index=False))
     table_e4.to_csv(args.out_dir / "tableE4_detection_performance.csv", index=False)
     print(f"  wrote {args.out_dir / 'tableE4_detection_performance.csv'}\n")

@@ -97,10 +97,23 @@ FONTSIZE = 14
 # --------------------------------------------------------------------------- #
 # Figure 5 -- detection-rate FROC operating point
 # --------------------------------------------------------------------------- #
-def cases_per_reader(matched: pd.DataFrame) -> pd.DataFrame:
-    """Number of distinct cases read by each (reader, session)."""
-    return (matched.groupby(["reader", "is_aided_encord"])["key"]
-            .nunique().rename("n_cases").reset_index())
+def cases_read(data_root: Path, readers=None) -> pd.DataFrame:
+    """CTs read per (reader, session): the FP-per-case denominator.
+
+    Each reader export has a row for every CT read (marked or not); the device was
+    run on all study CTs. Counting cases from the matched-detection table instead
+    would omit CTs with no marks and no reference nodule.
+    """
+    readers = READERS if readers is None else readers
+    rows = []
+    for r in readers:
+        ex = pd.read_csv(data_root / "final_exports" / f"{r}_S1_S2_final.csv",
+                         usecols=["study_id", "is_aided_encord"], low_memory=False)
+        for s, sub in ex.groupby("is_aided_encord"):
+            rows.append({"reader": r, "is_aided_encord": s, "n_cases": sub["study_id"].nunique()})
+    n_study = pd.read_csv(data_root / "dataset" / "clearest_patient_data_240.csv")["study_id_stage1"].nunique()
+    rows.append({"reader": "ai", "is_aided_encord": 1, "n_cases": n_study})
+    return pd.DataFrame(rows)
 
 
 def detection_perf(matched_op: pd.DataFrame, n_cases: pd.DataFrame,
@@ -141,9 +154,11 @@ def _froc_summary(sub: pd.DataFrame):
     }
 
 
-def make_figure5(matched: pd.DataFrame, out_path: Path) -> None:
-    """Figure 5 -- reader sensitivity vs FP/case at a 1x-diameter match radius."""
-    n_cases = cases_per_reader(matched)
+def make_figure5(matched: pd.DataFrame, out_path: Path, n_cases: pd.DataFrame) -> None:
+    """Figure 5 -- reader sensitivity vs FP/case at a 1x-diameter match radius.
+
+    ``n_cases``: CTs read per (reader, session), from ``cases_read``.
+    """
     matched_op = matched[matched["diam_multiplier"] == OPERATING_DM]
 
     # Two ground-truth subsets: all nodules (black), and EA diameter >= 5 mm (red).
@@ -313,7 +328,8 @@ def main() -> None:
     matched_filtered = pd.read_csv(
         detection_dir / "matched_all_readers_sessions_notn_all_ignore_filtered.csv",
         low_memory=False)
-    make_figure5(matched_filtered, args.out_dir / "figure5_detection_rate_froc.png")
+    make_figure5(matched_filtered, args.out_dir / "figure5_detection_rate_froc.png",
+                 cases_read(args.data_root))
 
     print("Figure E2 (Bland-Altman reader vs EA diameter):")
     matched_all = pd.read_csv(
